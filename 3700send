@@ -1,10 +1,19 @@
 #!/usr/bin/env -S python3 -u
 
-import argparse, socket, time, json, select, struct, sys, math
+import argparse
+import socket
+import time
+import json
+import select
+import struct
+import sys
+import math
 
 DATA_SIZE = 1375
 
+
 class Sender:
+
     def __init__(self, host, port):
         self.host = host
         self.remote_port = int(port)
@@ -18,11 +27,13 @@ class Sender:
         sys.stderr.flush()
 
     def send(self, message):
-        self.socket.sendto(json.dumps(message).encode('utf-8'), (self.host, self.remote_port))
+        self.socket.sendto(json.dumps(message).encode(
+            'utf-8'), (self.host, self.remote_port))
 
     def run(self):
         while True:
-            sockets = [self.socket, sys.stdin] if not self.waiting else [self.socket]
+            sockets = [self.socket, sys.stdin] if not self.waiting else [
+                self.socket]
 
             socks = select.select(sockets, [], [], 0.1)[0]
             for conn in socks:
@@ -38,12 +49,13 @@ class Sender:
                         self.log("All done!")
                         sys.exit(0)
 
-                    msg = { "type": "msg", "data": data }
+                    msg = {"type": "msg", "data": data}
                     self.log("Sending message '%s'" % msg)
                     self.send(msg)
                     self.waiting = True
 
         return
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='send data')
