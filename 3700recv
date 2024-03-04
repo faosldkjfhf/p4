@@ -9,8 +9,16 @@ import struct
 import sys
 import math
 
+# TODO:
+# Buffer class
+# keep track of next expected sequence number
+# add every packet into the buffer
+# when we get the one with the next expected sequence number
+# -> remove it and print msg to stdout
+
 
 class Receiver:
+
     def __init__(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', 0))
@@ -29,6 +37,7 @@ class Receiver:
         sys.stderr.flush()
 
     def run(self):
+        seen = []
         while True:
             socks = select.select([self.socket], [], [])[0]
             for conn in socks:
@@ -40,13 +49,19 @@ class Receiver:
                     self.remote_port = addr[1]
 
                 msg = json.loads(data.decode('utf-8'))
-                self.log("Received data message %s" % msg)
 
-                # Print out the data to stdout
-                print(msg["data"], end='', flush=True)
+                if (msg["sequence"] not in seen):
+                    seen.append(msg["sequence"])
+                    self.log("Received data message %s" % msg)
+
+                    # Print out the data to stdout
+                    print(msg["data"], end='', flush=True)
 
                 # Always send back an ack
-                self.send({"type": "ack"})
+
+                # TODO: include the advertised window?
+                # send back how big our buffer is
+                self.send({"type": "ack", "sequence": msg["sequence"]})
 
         return
 

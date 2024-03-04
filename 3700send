@@ -12,9 +12,27 @@ import math
 DATA_SIZE = 1375
 
 
+class Buffer:
+    def __init__(self, size):
+        self.size = size
+        self.data = []
+
+    def add(self, msg):
+        self.data.append(msg)
+
+    def remove(self, sequence):
+        for entry in self.data[:]:
+            if entry['sequence'] == sequence:
+                self.data.remove(entry)
+
+    def full(self):
+        return self.size == len(self.data)
+
+
 class Sender:
 
     def __init__(self, host, port):
+        self._buffer = Buffer(4)
         self.host = host
         self.remote_port = int(port)
         self.log("Sender starting up using port %s" % self.remote_port)
@@ -31,6 +49,7 @@ class Sender:
             'utf-8'), (self.host, self.remote_port))
 
     def run(self):
+        sequence = 0
         while True:
             sockets = [self.socket, sys.stdin] if not self.waiting else [
                 self.socket]
@@ -42,16 +61,31 @@ class Sender:
                     msg = k.decode('utf-8')
 
                     self.log("Received message '%s'" % msg)
+
+                    msg = json.loads(msg)
+                    sequence_number = msg['sequence']
+                    self._buffer.remove(sequence_number)
+
                     self.waiting = False
                 elif conn == sys.stdin:
-                    data = sys.stdin.read(DATA_SIZE)
-                    if len(data) == 0:
-                        self.log("All done!")
-                        sys.exit(0)
+                    # To handle dupes:
+                    # check window full before sending next?
 
-                    msg = {"type": "msg", "data": data}
-                    self.log("Sending message '%s'" % msg)
-                    self.send(msg)
+                    while not self._buffer.full():
+                        data = sys.stdin.read(DATA_SIZE)
+                        if len(data) == 0:
+                            self.log("All done!")
+                            sys.exit(0)
+
+                        msg = {"type": "msg", "data": data,
+                               "sequence": sequence}
+                        sequence += 1
+                        self.log("Sending message '%s'" % msg)
+
+                        self._buffer.add(msg)
+
+                        self.send(msg)
+
                     self.waiting = True
 
         return
