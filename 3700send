@@ -28,6 +28,17 @@ class Buffer:
     def full(self):
         return self.size == len(self.data)
 
+    def contains(self, msg):
+        return msg in self.data
+
+    def check_timeout(self):
+        msg_to_resend = []
+        current_time = time.time()
+        for entry in self.data:
+            if current_time - entry['time_sent'] > 1.0:
+                msg_to_resend.append(entry.copy())
+        return msg_to_resend
+
 
 class Sender:
 
@@ -60,9 +71,8 @@ class Sender:
                     k, addr = conn.recvfrom(65535)
                     msg = k.decode('utf-8')
 
-                    self.log("Received message '%s'" % msg)
-
                     msg = json.loads(msg)
+                    self.log("Received message %i" % msg['sequence'])
                     sequence_number = msg['sequence']
                     self._buffer.remove(sequence_number)
 
@@ -70,21 +80,28 @@ class Sender:
                 elif conn == sys.stdin:
                     # To handle dupes:
                     # check window full before sending next?
-
+                    resend = self._buffer.check_timeout()
+                    if len(resend) > 0:
+                        self.log("Resending message %i" %
+                                 resend[0]['sequence'])
+                        self.send(resend[0])
                     while not self._buffer.full():
+                        # self.log("HELLO")
                         data = sys.stdin.read(DATA_SIZE)
-                        if len(data) == 0:
+                        if len(data) == 0 and len(self._buffer.data) == 0:
                             self.log("All done!")
                             sys.exit(0)
 
-                        msg = {"type": "msg", "data": data,
-                               "sequence": sequence}
-                        sequence += 1
-                        self.log("Sending message '%s'" % msg)
+                        if len(data) != 0:
+                            msg = {"type": "msg", "data": data,
+                                   "sequence": sequence, "time_sent": time.time()}
+                            sequence += 1
+                            self.log("Sending message %i" % msg['sequence'])
+                            self._buffer.add(msg)
+                            self.send(msg)
 
-                        self._buffer.add(msg)
-
-                        self.send(msg)
+                        else:
+                            break
 
                     self.waiting = True
 

@@ -17,9 +17,48 @@ import math
 # -> remove it and print msg to stdout
 
 
+class Buffer:
+    # next expected sequence number
+    _expected = 0
+
+    # buffered messages
+    _buffer = []
+
+    def __init__(self):
+        pass
+
+    def add(self, msg):
+        self._buffer.append(msg)
+
+    def remove(self):
+        index = self.find_expected()
+        if self.find_expected() == -1:
+            return -1
+
+        # Print out the data to stdout
+        print(self._buffer[index]["data"], end='', flush=True)
+
+        self._buffer.pop(index)
+        # sys.stderr.write(f"Removed {index}\n")
+        # sys.stderr.flush()
+        self._expected += 1
+        return self._expected - 1
+
+    def find_expected(self):
+        if len(self._buffer) == 0:
+            return -1
+
+        for i in range(len(self._buffer)):
+            if self._buffer[i]['sequence'] == self._expected:
+                return i
+
+        return -1
+
+
 class Receiver:
 
     def __init__(self):
+        self._buffer = Buffer()
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', 0))
         self.port = self.socket.getsockname()[1]
@@ -50,19 +89,21 @@ class Receiver:
 
                 msg = json.loads(data.decode('utf-8'))
 
-                if (msg["sequence"] not in seen):
-                    seen.append(msg["sequence"])
-                    self.log("Received data message %s" % msg)
+                self.log("RECEIVER")
 
-                    # Print out the data to stdout
-                    print(msg["data"], end='', flush=True)
+                if (msg["sequence"] not in seen):
+                    # seen.append(msg["sequence"])
+                    self.log("Received data message %i" % msg['sequence'])
+
+                    self._buffer.add(msg)
+
+                    removed = self._buffer.remove()
+                    while (removed != -1):
+                        removed = self._buffer.remove()
 
                 # Always send back an ack
-
-                # TODO: include the advertised window?
-                # send back how big our buffer is
-                self.send({"type": "ack", "sequence": msg["sequence"]})
-
+                self.send(
+                    {"type": "ack", "sequence": msg["sequence"], "time_sent": time.time()})
         return
 
 
