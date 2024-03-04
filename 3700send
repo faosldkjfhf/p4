@@ -36,7 +36,7 @@ class Buffer:
         current_time = time.time()
         for entry in self.data:
             if current_time - entry['time_sent'] > 1.0:
-                msg_to_resend.append(entry.copy())
+                msg_to_resend.append(entry)
         return msg_to_resend
 
 
@@ -82,9 +82,14 @@ class Sender:
                     # check window full before sending next?
                     resend = self._buffer.check_timeout()
                     if len(resend) > 0:
-                        self.log("Resending message %i" %
-                                 resend[0]['sequence'])
-                        self.send(resend[0])
+                        for msg in resend:
+                            if (self._buffer.full()):
+                                break
+
+                            self.log("Resending message %i" %
+                                     msg['sequence'])
+                            self.send(msg)
+
                     while not self._buffer.full():
                         # self.log("HELLO")
                         data = sys.stdin.read(DATA_SIZE)
