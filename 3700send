@@ -90,6 +90,12 @@ class Sender:
                                      msg['sequence'])
                             self.send(msg)
 
+                            # update time sent
+                            msg = {"type": "msg", "data": msg['data'],
+                                   "sequence": msg['sequence'], "time_sent": time.time()}
+                            self._buffer.remove(msg['sequence'])
+                            self._buffer.add(msg)
+
                     while not self._buffer.full():
                         # self.log("HELLO")
                         data = sys.stdin.read(DATA_SIZE)
