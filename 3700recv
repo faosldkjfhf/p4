@@ -8,57 +8,15 @@ import select
 import struct
 import sys
 import math
-
-# TODO:
-# Buffer class
-# keep track of next expected sequence number
-# add every packet into the buffer
-# when we get the one with the next expected sequence number
-# -> remove it and print msg to stdout
-
-
-class Buffer:
-    # next expected sequence number
-    _expected = 0
-
-    # buffered messages
-    _buffer = []
-
-    def __init__(self):
-        pass
-
-    def add(self, msg):
-        self._buffer.append(msg)
-
-    def remove(self):
-        index = self.find_expected()
-        if self.find_expected() == -1:
-            return -1
-
-        # Print out the data to stdout
-        print(self._buffer[index]["data"], end='', flush=True)
-
-        self._buffer.pop(index)
-        # sys.stderr.write(f"Removed {index}\n")
-        # sys.stderr.flush()
-        self._expected += 1
-        return self._expected - 1
-
-    def find_expected(self):
-        if len(self._buffer) == 0:
-            return -1
-
-        for i in range(len(self._buffer)):
-            if self._buffer[i]['sequence'] == self._expected:
-                return i
-
-        return -1
+import heapq
 
 
 class Receiver:
 
     def __init__(self):
-        self._buffer = Buffer()
+        self._next_expected = 0
+        self._buffer = []
+        self._seen = []
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', 0))
         self.port = self.socket.getsockname()[1]
@@ -76,7 +34,6 @@ class Receiver:
         sys.stderr.flush()
 
     def run(self):
-        seen = []
         while True:
             socks = select.select([self.socket], [], [])[0]
             for conn in socks:
@@ -89,21 +46,25 @@ class Receiver:
 
                 msg = json.loads(data.decode('utf-8'))
 
-                self.log("RECEIVER")
+                sequence = msg['sequence']
 
-                if (msg["sequence"] not in seen):
-                    # seen.append(msg["sequence"])
-                    self.log("Received data message %i" % msg['sequence'])
+                if (sequence not in self._seen):
+                    self.log("Received data message %i" % sequence)
 
-                    self._buffer.add(msg)
+                    # self._buffer.add(msg)
+                    heapq.heappush(self._buffer, (sequence, msg))
 
-                    removed = self._buffer.remove()
-                    while (removed != -1):
-                        removed = self._buffer.remove()
+                    while len(self._buffer) > 0 and (self._buffer[0][0] == self._next_expected):
+                        seq, msg = heapq.heappop(self._buffer)
+                        print(msg["data"], end='', flush=True)
+                        self._seen.append(seq)
+                        self._next_expected += 1
+                        self.send(
+                            {"type": "ack", "sequence": seq})
 
                 # Always send back an ack
                 self.send(
-                    {"type": "ack", "sequence": msg["sequence"], "time_sent": time.time()})
+                    {"type": "ack", "sequence": msg["sequence"]})
         return
 
 

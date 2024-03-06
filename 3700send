@@ -11,39 +11,15 @@ import math
 
 DATA_SIZE = 1375
 
-
-class Buffer:
-    def __init__(self, size):
-        self.size = size
-        self.data = []
-
-    def add(self, msg):
-        self.data.append(msg)
-
-    def remove(self, sequence):
-        for entry in self.data[:]:
-            if entry['sequence'] == sequence:
-                self.data.remove(entry)
-
-    def full(self):
-        return self.size == len(self.data)
-
-    def contains(self, msg):
-        return msg in self.data
-
-    def check_timeout(self):
-        msg_to_resend = []
-        current_time = time.time()
-        for entry in self.data:
-            if current_time - entry['time_sent'] > 1.0:
-                msg_to_resend.append(entry)
-        return msg_to_resend
+# corruption - check sent sequence data == ack sequence date
+# if not, resend
 
 
 class Sender:
+    _data = []
+    _buffer = []
 
     def __init__(self, host, port):
-        self._buffer = Buffer(4)
         self.host = host
         self.remote_port = int(port)
         self.log("Sender starting up using port %s" % self.remote_port)
@@ -61,61 +37,67 @@ class Sender:
 
     def run(self):
         sequence = 0
+        window = 4
         while True:
             sockets = [self.socket, sys.stdin] if not self.waiting else [
                 self.socket]
+
+            # check if anything must be resent
+            if self.waiting:
+                current_time = time.time()
+                for entry in self._buffer:
+                    if current_time - entry['time_sent'] > 1.0:
+                        self.log("Resending message %i" %
+                                 entry['sequence'])
+                        entry['time_sent'] = current_time
+                        self.send(entry)
 
             socks = select.select(sockets, [], [], 0.1)[0]
             for conn in socks:
                 if conn == self.socket:
                     k, addr = conn.recvfrom(65535)
-                    msg = k.decode('utf-8')
 
-                    msg = json.loads(msg)
-                    self.log("Received message %i" % msg['sequence'])
-                    sequence_number = msg['sequence']
-                    self._buffer.remove(sequence_number)
+                    try:
+                        msg = k.decode('utf-8')
+                        msg = json.loads(msg)
+                        self.log("Received message %i" % msg['sequence'])
+                        sequence_number = msg['sequence']
 
-                    self.waiting = False
-                elif conn == sys.stdin:
-                    # To handle dupes:
-                    # check window full before sending next?
-                    resend = self._buffer.check_timeout()
-                    if len(resend) > 0:
-                        for msg in resend:
-                            if (self._buffer.full()):
+                        for entry in self._buffer[:]:
+                            if entry['sequence'] == sequence_number:
+                                self._buffer.remove(entry)
                                 break
 
-                            self.log("Resending message %i" %
-                                     msg['sequence'])
-                            self.send(msg)
-
-                            # update time sent
-                            msg = {"type": "msg", "data": msg['data'],
-                                   "sequence": msg['sequence'], "time_sent": time.time()}
-                            self._buffer.remove(msg['sequence'])
-                            self._buffer.add(msg)
-
-                    while not self._buffer.full():
-                        # self.log("HELLO")
+                        if len(self._buffer) == 0:
+                            self.waiting = False
+                    except ValueError:
+                        pass
+                elif conn == sys.stdin:
+                    # parse all data
+                    if len(self._data) == 0:
                         data = sys.stdin.read(DATA_SIZE)
-                        if len(data) == 0 and len(self._buffer.data) == 0:
+                        while (len(data) > 0):
+                            msg = {"type": "msg", "data": data,
+                                   "sequence": sequence, "time_sent": time.time()}
+                            self._data.append(msg)
+                            sequence += 1
+                            data = sys.stdin.read(DATA_SIZE)
+
+                    for _ in range(window):
+                        if len(self._data) == 0 and len(self._buffer) == 0:
                             self.log("All done!")
                             sys.exit(0)
 
-                        if len(data) != 0:
-                            msg = {"type": "msg", "data": data,
-                                   "sequence": sequence, "time_sent": time.time()}
-                            sequence += 1
-                            self.log("Sending message %i" % msg['sequence'])
-                            self._buffer.add(msg)
-                            self.send(msg)
-
-                        else:
+                        if len(self._data) == 0:
                             break
 
-                    self.waiting = True
+                        msg = self._data.pop(0)
+                        msg['time_sent'] = time.time()
+                        self._buffer.append(msg)
+                        self.send(msg)
+                        self.log("Sending message %i" % msg['sequence'])
 
+                    self.waiting = True
         return
 
 
