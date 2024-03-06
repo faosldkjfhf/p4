@@ -53,16 +53,12 @@ class Receiver:
 
                 if (sequence not in self._processed):
                     self.log("Received data message %i" % sequence)
-                    # self.log(f"buffer: {self._buffer}")
-                    # self.log(f"msg: {msg}")
 
-                    queued = False
-                    for i in self._buffer:
+                    for i in self._buffer[:]:
                         if sequence == i[0]:
-                            queued = True
+                            self._buffer.remove(i)
 
-                    if not queued:
-                        heapq.heappush(self._buffer, (sequence, msg))
+                    heapq.heappush(self._buffer, (sequence, msg))
 
                     while len(self._buffer) > 0 and (self._buffer[0][0] == self._next_expected):
                         seq, msg = heapq.heappop(self._buffer)
