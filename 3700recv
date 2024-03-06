@@ -10,13 +10,16 @@ import sys
 import math
 import heapq
 
+# corrupted packets
+# 1.
+
 
 class Receiver:
 
     def __init__(self):
         self._next_expected = 0
         self._buffer = []
-        self._seen = []
+        self._processed = []
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', 0))
         self.port = self.socket.getsockname()[1]
@@ -48,23 +51,30 @@ class Receiver:
 
                 sequence = msg['sequence']
 
-                if (sequence not in self._seen):
+                if (sequence not in self._processed):
                     self.log("Received data message %i" % sequence)
+                    # self.log(f"buffer: {self._buffer}")
+                    # self.log(f"msg: {msg}")
 
-                    # self._buffer.add(msg)
-                    heapq.heappush(self._buffer, (sequence, msg))
+                    queued = False
+                    for i in self._buffer:
+                        if sequence == i[0]:
+                            queued = True
+
+                    if not queued:
+                        heapq.heappush(self._buffer, (sequence, msg))
 
                     while len(self._buffer) > 0 and (self._buffer[0][0] == self._next_expected):
                         seq, msg = heapq.heappop(self._buffer)
                         print(msg["data"], end='', flush=True)
-                        self._seen.append(seq)
+                        self._processed.append(seq)
                         self._next_expected += 1
                         self.send(
-                            {"type": "ack", "sequence": seq})
+                            {"type": "ack", "sequence": seq, "time_sent": time.time()})
 
                 # Always send back an ack
                 self.send(
-                    {"type": "ack", "sequence": msg["sequence"]})
+                    {"type": "ack", "sequence": msg["sequence"], "time_sent": time.time()})
         return
 
 

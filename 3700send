@@ -17,7 +17,11 @@ DATA_SIZE = 1375
 
 class Sender:
     _data = []
+    _parsed = False
     _buffer = []
+    _sequence = 0
+    _acked = []
+    _rtt = 0.5
 
     def __init__(self, host, port):
         self.host = host
@@ -35,8 +39,13 @@ class Sender:
         self.socket.sendto(json.dumps(message).encode(
             'utf-8'), (self.host, self.remote_port))
 
+    def calc_rtt(self, new_rtt):
+        alpha = 0.875
+        rtt = ((alpha * self._rtt) + ((1 - alpha) * new_rtt))
+        self._rtt = self._rtt if rtt < 0 else rtt
+        self.log(f"new rtt:{self._rtt}")
+
     def run(self):
-        sequence = 0
         window = 4
         while True:
             sockets = [self.socket, sys.stdin] if not self.waiting else [
@@ -46,7 +55,7 @@ class Sender:
             if self.waiting:
                 current_time = time.time()
                 for entry in self._buffer:
-                    if current_time - entry['time_sent'] > 1.0:
+                    if current_time - entry['time_sent'] > 2 * self._rtt:
                         self.log("Resending message %i" %
                                  entry['sequence'])
                         entry['time_sent'] = current_time
@@ -60,13 +69,17 @@ class Sender:
                     try:
                         msg = k.decode('utf-8')
                         msg = json.loads(msg)
-                        self.log("Received message %i" % msg['sequence'])
-                        sequence_number = msg['sequence']
+                        sequence = msg['sequence']
+                        self.log("Received message %i" % sequence)
 
-                        for entry in self._buffer[:]:
-                            if entry['sequence'] == sequence_number:
-                                self._buffer.remove(entry)
-                                break
+                        if sequence not in self._acked:
+                            for entry in self._buffer[:]:
+                                if entry['sequence'] == sequence:
+                                    self.calc_rtt(
+                                        msg['time_sent'] - entry['time_sent'])
+                                    self._buffer.remove(entry)
+                                    self._acked.append(sequence)
+                                    break
 
                         if len(self._buffer) == 0:
                             self.waiting = False
@@ -74,15 +87,10 @@ class Sender:
                         pass
                 elif conn == sys.stdin:
                     # parse all data
-                    if len(self._data) == 0:
-                        data = sys.stdin.read(DATA_SIZE)
-                        while (len(data) > 0):
-                            msg = {"type": "msg", "data": data,
-                                   "sequence": sequence, "time_sent": time.time()}
-                            self._data.append(msg)
-                            sequence += 1
-                            data = sys.stdin.read(DATA_SIZE)
+                    if not self._parsed:
+                        self.load_data()
 
+                    # add to buffer until window is full
                     for _ in range(window):
                         if len(self._data) == 0 and len(self._buffer) == 0:
                             self.log("All done!")
@@ -99,6 +107,16 @@ class Sender:
 
                     self.waiting = True
         return
+
+    def load_data(self):
+        data = sys.stdin.read(DATA_SIZE)
+        while (len(data) > 0):
+            msg = {"type": "msg", "data": data,
+                   "sequence": self._sequence, "time_sent": time.time()}
+            self._data.append(msg)
+            self._sequence += 1
+            data = sys.stdin.read(DATA_SIZE)
+        self._parsed = True
 
 
 if __name__ == "__main__":
