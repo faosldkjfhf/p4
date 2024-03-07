@@ -19,6 +19,7 @@ class Receiver:
     def __init__(self):
         self._next_expected = 0
         self._buffer = []
+        self._window = 8
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', 0))
         self.port = self.socket.getsockname()[1]
@@ -52,7 +53,7 @@ class Receiver:
                     if 'checksum' in msg and 'data' in msg and sum(msg['data'].encode()) == msg['checksum']:
                         sequence = msg['sequence']
 
-                        cwnd = msg['cwnd']
+                        # cwnd = msg['cwnd']
 
                         # if not already parsed
                         if (sequence >= self._next_expected):
@@ -64,21 +65,26 @@ class Receiver:
                                     self._buffer.remove(i)
 
                             # add into the buffer (min heap)
-                            heapq.heappush(self._buffer, (sequence, msg))
+                            if len(self._buffer) < self._window:
+                                heapq.heappush(self._buffer, (sequence, msg))
+                            else:
+                                self.log("Dropped packet")
 
                             removed = False
                             # remove from buffer if correct sequence
                             while len(self._buffer) > 0 and (self._buffer[0][0] == self._next_expected):
+                                removed = True
                                 seq, msg = heapq.heappop(self._buffer)
                                 print(msg["data"], end='', flush=True)
                                 self._next_expected += 1
+                                # self.log(f"window: {cwnd - len(self._buffer)}")
                                 self.send(
-                                    {"type": "ack", "sequence": seq, "time_sent": time.time(), "adv_window": cwnd - len(self._buffer)})
+                                    {"type": "ack", "sequence": seq, "time_sent": time.time(), "adv_window": self._window - len(self._buffer)})
 
                         # Always send back an ack
                         if 'sequence' in msg and 'cwnd' in msg:
                             self.send(
-                                {"type": "ack", "sequence": msg["sequence"], "time_sent": time.time(), "adv_window": msg['cwnd'] - len(self._buffer)})
+                                {"type": "ack", "sequence": msg["sequence"], "time_sent": time.time(), "adv_window": self._window - len(self._buffer)})
                 except ValueError or KeyError:
                     pass
         return

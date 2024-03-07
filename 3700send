@@ -21,12 +21,11 @@ class Sender:
     _buffer = []
     _sequence = 0
     _acked = []
-    _advertised_window = 2
-    _rtt = 0.5
+    _advertised_window = 8
+    _rtt = 1
 
     _cwnd = 1
     _ssthresh = _advertised_window
-    _wnd = min(_cwnd, _advertised_window)
 
     def __init__(self, host, port):
         self.host = host
@@ -48,7 +47,7 @@ class Sender:
         alpha = 0.875
         rtt = ((alpha * self._rtt) + ((1 - alpha) * new_rtt))
         self._rtt = self._rtt if rtt < 0 else rtt
-        # self.log(f"new rtt: {self._rtt}")
+        self.log(f"new rtt: {self._rtt}")
 
     def run(self):
         while True:
@@ -58,32 +57,35 @@ class Sender:
             # check if anything must be resent
             if self.waiting:
                 current_time = time.time()
-                for entry in self._buffer:
-                    if current_time - entry['time_sent'] > 2 * self._rtt:
+                for entry in self._buffer[:]:
+                    if (current_time - entry['time_sent']) > 2 * self._rtt:
                         self.log("Resending message %i" %
                                  entry['sequence'])
                         entry['time_sent'] = current_time
+                        entry['cwnd'] = 1
                         self.send(entry)
 
                         # packet timed out so resend and adjust cwnd
-                        self._ssthresh = int(self._cwnd / 2)
-                        self._cnwd = 1
+                        self._ssthresh = int(self._cwnd) / 2
+                        self._cwnd = 1
 
             socks = select.select(sockets, [], [], 0.1)[0]
             for conn in socks:
                 if conn == self.socket:
                     k, addr = conn.recvfrom(65535)
 
-                    if (self._cwnd < self._ssthresh):
-                        self._cwnd += 1
-                    else:
-                        self._cwnd += 1 / self._cwnd
-
                     try:
                         msg = k.decode('utf-8')
                         msg = json.loads(msg)
                         sequence = msg['sequence']
                         self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
+
+                        if (self._cwnd < self._ssthresh):
+                            self._cwnd += 1
+                        else:
+                            self._cwnd += 1 / self._cwnd
+
+                        self.log(f"cwnd: {self._cwnd}")
 
                         self.log("Received message %i" % sequence)
 
@@ -106,7 +108,8 @@ class Sender:
                         self.load_data()
 
                     # add to buffer until window is full
-                    for _ in range(min(int(self._advertised_window), int(self._cwnd))):
+                    window = min(int(self._advertised_window), int(self._cwnd))
+                    for _ in range(window):
                         if len(self._data) == 0 and len(self._buffer) == 0:
                             self.log("All done!")
                             sys.exit(0)
@@ -116,7 +119,7 @@ class Sender:
 
                         msg = self._data.pop(0)
                         msg['time_sent'] = time.time()
-                        msg['cwnd'] = self._cwnd
+                        msg['cwnd'] = window
                         self._buffer.append(msg)
                         self.send(msg)
                         self.log("Sending message %i" % msg['sequence'])
