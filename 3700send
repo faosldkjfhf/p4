@@ -22,9 +22,9 @@ class Sender:
     _parsed = False
     _buffer = {}
     _sent = {}
+    _seen = []
     _received = {}
     _sequence = 0
-    # _acked = []
     _advertised_window = 8
     _rtt = 0
 
@@ -50,7 +50,7 @@ class Sender:
     def calc_rtt(self, new_rtt):
         alpha = 0.875
         self._rtt = ((alpha * self._rtt) + ((1 - alpha) * new_rtt))
-        self.log(f"rtt: {2 * self._rtt}")
+        # self.log(f"rtt: {2 * self._rtt}")
 
     def check_resend(self):
         for seq in self._sent.keys():
@@ -78,7 +78,7 @@ class Sender:
                 if conn == self.socket:
                     k, addr = conn.recvfrom(65535)
 
-                    # TODO: Add checksum check
+                    # check if ack is corrupted
                     try:
                         msg = k.decode('utf-8')
                         msg = json.loads(msg)
@@ -88,15 +88,10 @@ class Sender:
 
                         if checksum != msg_checksum:
                             continue
-
                     except:
                         continue
 
                     sequence = msg['sequence']
-                    self.log("Received message %i" % sequence)
-                    self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
-                    if (sequence >= self._next):
-                        self._received[sequence] = time.time()
 
                     # increase congestion window
                     if (self._cwnd < self._ssthresh):
@@ -104,18 +99,24 @@ class Sender:
                     else:
                         self._cwnd += 1 / self._cwnd
 
-                    # pop in order
-                    while self._next in self._received:
-                        self.calc_rtt(
-                            self._received[self._next] - self._buffer[self._next]['time_sent'])
-                        del self._buffer[self._next]
-                        del self._sent[self._next]
-                        del self._received[self._next]
-                        self._next += 1
+                    if (sequence >= self._next and sequence not in self._received):
+                        self.log("Received message %i" % sequence)
+                        self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
 
-                    # if there is nothing in the buffer, send more
-                    if len(self._buffer.keys()) == 0:
-                        self.waiting = False
+                        self._received[sequence] = time.time()
+
+                        # pop in order
+                        while self._next in self._received:
+                            self.calc_rtt(
+                                self._received[self._next] - self._buffer[self._next]['time_sent'])
+                            del self._buffer[self._next]
+                            del self._sent[self._next]
+                            del self._received[self._next]
+                            self._next += 1
+
+                        # if there is nothing in the buffer, send more
+                        if len(self._buffer.keys()) == 0:
+                            self.waiting = False
 
                 elif conn == sys.stdin:
                     # parse all data
@@ -124,7 +125,6 @@ class Sender:
 
                     # add to buffer until window is full
                     window = min(int(self._advertised_window), int(self._cwnd))
-                    # self.log(f"window: {window}")
 
                     for _ in range(window):
                         # no more data and buffer is all empty
@@ -139,6 +139,7 @@ class Sender:
                         # send the next message
                         msg = self._data.pop(0)
                         msg['time_sent'] = time.time()
+                        msg['checksum'] = self.checksum(msg['data'])
 
                         self.send(msg)
                         self.log("Sending message %i" % msg['sequence'])
@@ -153,8 +154,7 @@ class Sender:
         data = sys.stdin.read(DATA_SIZE)
         while (len(data) > 0):
             msg = {"type": "msg", "data": data,
-                   "sequence": self._sequence,
-                   "checksum": self.checksum(data)}
+                   "sequence": self._sequence, }
             self._data.append(msg)
             self._sequence += 1
             data = sys.stdin.read(DATA_SIZE)

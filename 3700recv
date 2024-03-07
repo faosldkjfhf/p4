@@ -11,9 +11,6 @@ import math
 import heapq
 import zlib
 
-# corrupted packets
-# 1.
-
 
 class Receiver:
 
@@ -21,7 +18,9 @@ class Receiver:
         self._next_expected = 0
         self._buffer = []
         self._sent = {}
+        self._times = {}
         self._window = 8
+        self._rtt = 1
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', 0))
         self.port = self.socket.getsockname()[1]
@@ -39,12 +38,20 @@ class Receiver:
         sys.stderr.flush()
 
     def check_resend(self):
-        pass
+        # how can we tell if an ack has been received
+
+        for seq in self._sent:
+            ack = self._sent[seq]
+            if time.time() - self._times[seq] > 2 * self._rtt:
+                self.log(f"Resending ack {seq}")
+                self.send(ack)
+                self._times[seq] = time.time()
 
     def run(self):
         while True:
             socks = select.select([self.socket], [], [])[0]
 
+            # check if any acks need to be resent
             self.check_resend()
 
             for conn in socks:
@@ -55,6 +62,7 @@ class Receiver:
                     self.remote_host = addr[0]
                     self.remote_port = addr[1]
 
+                # check is packet is corrupted
                 try:
                     msg = json.loads(data.decode('utf-8'))
 
@@ -89,12 +97,18 @@ class Receiver:
                        "adv_window": self._window - len(self._buffer)}
                 ack['checksum'] = zlib.crc32(json.dumps(ack).encode('utf-8'))
                 self.send(ack)
+                self._sent[ack['sequence']] = ack
+                self._times[ack['sequence']] = ack['time_sent']
 
                 # remove from buffer if correct sequence
                 while len(self._buffer) > 0 and (self._buffer[0][0] == self._next_expected):
                     seq, msg = heapq.heappop(self._buffer)
                     print(msg["data"], end='', flush=True)
                     self._next_expected += 1
+
+                if len(self._sent) == self._window:
+                    self._sent = {}
+                    self._times = {}
 
         return
 
