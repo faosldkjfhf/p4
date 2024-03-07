@@ -8,6 +8,7 @@ import select
 import struct
 import sys
 import math
+import zlib
 
 DATA_SIZE = 1375
 
@@ -17,12 +18,15 @@ DATA_SIZE = 1375
 
 class Sender:
     _data = []
+    _next = 0
     _parsed = False
-    _buffer = []
+    _buffer = {}
+    _sent = {}
+    _received = {}
     _sequence = 0
-    _acked = []
+    # _acked = []
     _advertised_window = 8
-    _rtt = 1
+    _rtt = 0
 
     _cwnd = 1
     _ssthresh = _advertised_window
@@ -45,63 +49,74 @@ class Sender:
 
     def calc_rtt(self, new_rtt):
         alpha = 0.875
-        rtt = ((alpha * self._rtt) + ((1 - alpha) * new_rtt))
-        self._rtt = self._rtt if rtt < 0 else rtt
-        self.log(f"new rtt: {self._rtt}")
+        self._rtt = ((alpha * self._rtt) + ((1 - alpha) * new_rtt))
+        self.log(f"rtt: {2 * self._rtt}")
+
+    def check_resend(self):
+        for seq in self._sent.keys():
+            if (time.time() - self._sent[seq]) > 2 * self._rtt:
+                self.log("Resending message %i" % seq)
+                self._sent[seq] = time.time()
+                # self._buffer[seq]['time_sent'] = time.time()
+                self.send(self._buffer[seq])
+
+                # packet timed out so resend and adjust cwnd
+                self._ssthresh = int(self._cwnd) / 2
+                self._cwnd = 1
 
     def run(self):
         while True:
             sockets = [self.socket, sys.stdin] if not self.waiting else [
                 self.socket]
 
-            # check if anything must be resent
-            if self.waiting:
-                current_time = time.time()
-                for entry in self._buffer[:]:
-                    if (current_time - entry['time_sent']) > 2 * self._rtt:
-                        self.log("Resending message %i" %
-                                 entry['sequence'])
-                        entry['time_sent'] = current_time
-                        entry['cwnd'] = 1
-                        self.send(entry)
-
-                        # packet timed out so resend and adjust cwnd
-                        self._ssthresh = int(self._cwnd) / 2
-                        self._cwnd = 1
-
             socks = select.select(sockets, [], [], 0.1)[0]
+
+            # check if anything must be resent
+            self.check_resend()
+
             for conn in socks:
                 if conn == self.socket:
                     k, addr = conn.recvfrom(65535)
 
+                    # TODO: Add checksum check
                     try:
                         msg = k.decode('utf-8')
                         msg = json.loads(msg)
-                        sequence = msg['sequence']
-                        self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
+                        msg_checksum = msg['checksum']
+                        del msg['checksum']
+                        checksum = zlib.crc32(json.dumps(msg).encode('utf-8'))
 
-                        if (self._cwnd < self._ssthresh):
-                            self._cwnd += 1
-                        else:
-                            self._cwnd += 1 / self._cwnd
+                        if checksum != msg_checksum:
+                            continue
 
-                        self.log(f"cwnd: {self._cwnd}")
+                    except:
+                        continue
 
-                        self.log("Received message %i" % sequence)
+                    sequence = msg['sequence']
+                    self.log("Received message %i" % sequence)
+                    self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
+                    if (sequence >= self._next):
+                        self._received[sequence] = time.time()
 
-                        if sequence not in self._acked:
-                            for entry in self._buffer[:]:
-                                if entry['sequence'] == sequence:
-                                    self.calc_rtt(
-                                        msg['time_sent'] - entry['time_sent'])
-                                    self._buffer.remove(entry)
-                                    self._acked.append(sequence)
-                                    break
+                    # increase congestion window
+                    if (self._cwnd < self._ssthresh):
+                        self._cwnd += 1
+                    else:
+                        self._cwnd += 1 / self._cwnd
 
-                        if len(self._buffer) == 0:
-                            self.waiting = False
-                    except ValueError:
-                        pass
+                    # pop in order
+                    while self._next in self._received:
+                        self.calc_rtt(
+                            self._received[self._next] - self._buffer[self._next]['time_sent'])
+                        del self._buffer[self._next]
+                        del self._sent[self._next]
+                        del self._received[self._next]
+                        self._next += 1
+
+                    # if there is nothing in the buffer, send more
+                    if len(self._buffer.keys()) == 0:
+                        self.waiting = False
+
                 elif conn == sys.stdin:
                     # parse all data
                     if not self._parsed:
@@ -109,20 +124,27 @@ class Sender:
 
                     # add to buffer until window is full
                     window = min(int(self._advertised_window), int(self._cwnd))
+                    # self.log(f"window: {window}")
+
                     for _ in range(window):
+                        # no more data and buffer is all empty
                         if len(self._data) == 0 and len(self._buffer) == 0:
                             self.log("All done!")
                             sys.exit(0)
 
+                        # no more data but buffer not empty
                         if len(self._data) == 0:
                             break
 
+                        # send the next message
                         msg = self._data.pop(0)
                         msg['time_sent'] = time.time()
-                        msg['cwnd'] = window
-                        self._buffer.append(msg)
+
                         self.send(msg)
                         self.log("Sending message %i" % msg['sequence'])
+
+                        self._sent[msg['sequence']] = msg['time_sent']
+                        self._buffer[msg['sequence']] = msg
 
                     self.waiting = True
         return
@@ -131,15 +153,15 @@ class Sender:
         data = sys.stdin.read(DATA_SIZE)
         while (len(data) > 0):
             msg = {"type": "msg", "data": data,
-                   "sequence": self._sequence, "time_sent": time.time(),
-                   "checksum": self.checksum(data), "cwnd": self._cwnd}
+                   "sequence": self._sequence,
+                   "checksum": self.checksum(data)}
             self._data.append(msg)
             self._sequence += 1
             data = sys.stdin.read(DATA_SIZE)
         self._parsed = True
 
     def checksum(self, msg):
-        return sum(msg.encode())
+        return zlib.crc32(msg.encode('utf-8'))
 
 
 if __name__ == "__main__":
