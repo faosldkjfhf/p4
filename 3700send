@@ -99,24 +99,24 @@ class Sender:
                     else:
                         self._cwnd += 1 / self._cwnd
 
-                    if (sequence >= self._next and sequence not in self._received):
+                    if sequence not in self._received:
                         self.log("Received message %i" % sequence)
                         self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
 
                         self._received[sequence] = time.time()
 
-                        # pop in order
-                        while self._next in self._received:
-                            self.calc_rtt(
-                                self._received[self._next] - self._buffer[self._next]['time_sent'])
-                            del self._buffer[self._next]
-                            del self._sent[self._next]
-                            del self._received[self._next]
-                            self._next += 1
+                    # pop in order
+                    while self._next in self._received:
+                        self.calc_rtt(
+                            self._received[self._next] - self._buffer[self._next]['time_sent'])
+                        del self._buffer[self._next]
+                        del self._sent[self._next]
+                        del self._received[self._next]
+                        self._next += 1
 
-                        # if there is nothing in the buffer, send more
-                        if len(self._buffer.keys()) == 0:
-                            self.waiting = False
+                    # if there is nothing in the buffer, send more
+                    if len(self._buffer.keys()) == 0:
+                        self.waiting = False
 
                 elif conn == sys.stdin:
                     # parse all data
