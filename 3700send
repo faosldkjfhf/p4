@@ -9,6 +9,7 @@ import struct
 import sys
 import math
 import zlib
+import rtt
 
 DATA_SIZE = 1375
 
@@ -49,15 +50,19 @@ class Sender:
 
     def calc_rtt(self, new_rtt):
         alpha = 0.875
-        self._rtt = ((alpha * self._rtt) + ((1 - alpha) * new_rtt))
+        rtt.rtt = ((alpha * rtt.rtt) + ((1 - alpha) * new_rtt))
         # self.log(f"rtt: {2 * self._rtt}")
 
     def check_resend(self):
         dropped = False
-        for seq in self._sent.keys():
-            if (time.time() - self._sent[seq]) > 2 * self._rtt:
+        for seq in self._sent:
+            if seq in self._received:
+                continue
+
+            if (time.time() - self._sent[seq]) > 2 * rtt.rtt:
                 self.log("Resending message %i" % seq)
                 self._sent[seq] = time.time()
+                # self._buffer[seq]['time_sent'] = time.time()
                 self.send(self._buffer[seq])
 
                 if not dropped:
@@ -101,7 +106,7 @@ class Sender:
                     else:
                         self._cwnd += 1 / self._cwnd
 
-                    if sequence not in self._received:
+                    if sequence >= self._next and sequence not in self._received:
                         self.log("Received message %i" % sequence)
                         self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
 
