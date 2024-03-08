@@ -25,8 +25,8 @@ class Sender:
     _seen = []
     _received = {}
     _sequence = 0
-    _advertised_window = 8
-    _rtt = 0
+    _advertised_window = 16
+    _rtt = 0.25
 
     _cwnd = 1
     _ssthresh = _advertised_window
@@ -53,16 +53,18 @@ class Sender:
         # self.log(f"rtt: {2 * self._rtt}")
 
     def check_resend(self):
+        dropped = False
         for seq in self._sent.keys():
             if (time.time() - self._sent[seq]) > 2 * self._rtt:
                 self.log("Resending message %i" % seq)
                 self._sent[seq] = time.time()
-                # self._buffer[seq]['time_sent'] = time.time()
                 self.send(self._buffer[seq])
 
-                # packet timed out so resend and adjust cwnd
-                self._ssthresh = int(self._cwnd) / 2
-                self._cwnd = 1
+                if not dropped:
+                    # packet timed out so resend and adjust cwnd
+                    self._ssthresh = int(self._cwnd) / 2
+                    self._cwnd = 1
+                    dropped = True
 
     def run(self):
         while True:

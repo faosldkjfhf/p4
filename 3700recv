@@ -19,8 +19,8 @@ class Receiver:
         self._buffer = []
         self._sent = {}
         self._times = {}
-        self._window = 8
-        self._rtt = 1
+        self._window = 16
+        self._rtt = 0.95
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('0.0.0.0', 0))
         self.port = self.socket.getsockname()[1]
@@ -86,10 +86,7 @@ class Receiver:
                             self._buffer.remove(entry)
 
                     # add into the buffer (min heap)
-                    if len(self._buffer) < self._window:
-                        heapq.heappush(self._buffer, (sequence, msg))
-                    else:
-                        self.log("Dropped packet")
+                    heapq.heappush(self._buffer, (sequence, msg))
 
                 # Always send back an ack
                 ack = {"type": "ack", "sequence": msg["sequence"],
