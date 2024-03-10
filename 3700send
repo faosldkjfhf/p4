@@ -51,7 +51,6 @@ class Sender:
     def calc_rtt(self, new_rtt):
         alpha = 0.875
         rtt.rtt = ((alpha * rtt.rtt) + ((1 - alpha) * new_rtt))
-        # self.log(f"rtt: {2 * self._rtt}")
 
     def check_resend(self):
         dropped = False
@@ -62,7 +61,6 @@ class Sender:
             if (time.time() - self._sent[seq]) > 2 * rtt.rtt:
                 self.log("Resending message %i" % seq)
                 self._sent[seq] = time.time()
-                # self._buffer[seq]['time_sent'] = time.time()
                 self.send(self._buffer[seq])
 
                 if not dropped:
@@ -112,7 +110,7 @@ class Sender:
 
                         self._received[sequence] = time.time()
 
-                    # pop in order
+                    # pop in order - don't really need but nice
                     while self._next in self._received:
                         self.calc_rtt(
                             self._received[self._next] - self._buffer[self._next]['time_sent'])
@@ -121,9 +119,7 @@ class Sender:
                         del self._received[self._next]
                         self._next += 1
 
-                    # if there is nothing in the buffer, send more
-                    if len(self._buffer.keys()) == 0:
-                        self.waiting = False
+                    self.waiting = False
 
                 elif conn == sys.stdin:
                     # parse all data
@@ -134,6 +130,9 @@ class Sender:
                     window = min(int(self._advertised_window), int(self._cwnd))
 
                     for _ in range(window):
+                        if len(self._buffer) >= window:
+                            break
+
                         # no more data and buffer is all empty
                         if len(self._data) == 0 and len(self._buffer) == 0:
                             self.log("All done!")
