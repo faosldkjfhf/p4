@@ -19,16 +19,23 @@ DATA_SIZE = 1375
 
 class Sender:
     _data = []
-    _next = 0
     _parsed = False
+
+    # next packet to check
+    _next = 0
+
     _buffer = {}
     _sent = {}
     _seen = []
     _received = {}
-    _sequence = 0
-    _advertised_window = 16
-    _rtt = 0.25
 
+    # sequence counter
+    _sequence = 0
+
+    # advertised window start
+    _advertised_window = 16
+
+    # congestion defaults
     _cwnd = 1
     _ssthresh = _advertised_window
 
@@ -48,15 +55,15 @@ class Sender:
         self.socket.sendto(json.dumps(message).encode(
             'utf-8'), (self.host, self.remote_port))
 
+    # sets the RTT based on the new rtt
     def calc_rtt(self, new_rtt):
         alpha = 0.875
         rtt.rtt = ((alpha * rtt.rtt) + ((1 - alpha) * new_rtt))
 
+    # checks if a packet must be resent
     def check_resend(self):
         dropped = False
         for seq in self._sent:
-            if seq in self._received:
-                continue
 
             if (time.time() - self._sent[seq]) > 2 * rtt.rtt:
                 self.log("Resending message %i" % seq)
@@ -104,6 +111,7 @@ class Sender:
                     else:
                         self._cwnd += 1 / self._cwnd
 
+                    # add the packet into our received map
                     if sequence >= self._next and sequence not in self._received:
                         self.log("Received message %i" % sequence)
                         self._advertised_window = 0 if msg['adv_window'] < 0 else msg['adv_window']
@@ -119,6 +127,7 @@ class Sender:
                         del self._received[self._next]
                         self._next += 1
 
+                    # try and parse more data up until the window size
                     self.waiting = False
 
                 elif conn == sys.stdin:
@@ -150,12 +159,15 @@ class Sender:
                         self.send(msg)
                         self.log("Sending message %i" % msg['sequence'])
 
+                        # set the default time sent and add into the buffer
                         self._sent[msg['sequence']] = msg['time_sent']
                         self._buffer[msg['sequence']] = msg
 
+                    # parse incoming acks
                     self.waiting = True
         return
 
+    # loads data from sys.stdin until there is no more data
     def load_data(self):
         data = sys.stdin.read(DATA_SIZE)
         while (len(data) > 0):
@@ -166,6 +178,7 @@ class Sender:
             data = sys.stdin.read(DATA_SIZE)
         self._parsed = True
 
+    # calculates the checksum of a json object
     def checksum(self, msg):
         return zlib.crc32(msg.encode('utf-8'))
 

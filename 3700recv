@@ -37,9 +37,8 @@ class Receiver:
         sys.stderr.write(message + "\n")
         sys.stderr.flush()
 
+    # checks if we must resend acks
     def check_resend(self):
-        # how can we tell if an ack has been received
-
         for seq in self._sent:
             ack = self._sent[seq]
             if time.time() - self._times[seq] > 1.75 * rtt.rtt:
@@ -71,7 +70,6 @@ class Receiver:
                     if checksum != msg['checksum']:
                         continue
                 except:
-                    self.log("corrupted packet, skipping")
                     continue
 
                 sequence = msg['sequence']
