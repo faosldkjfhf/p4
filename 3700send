@@ -64,6 +64,8 @@ class Sender:
     def check_resend(self):
         dropped = False
         for seq in self._sent:
+            if seq in self._received:
+                continue
 
             if (time.time() - self._sent[seq]) > 2 * rtt.rtt:
                 self.log("Resending message %i" % seq)
